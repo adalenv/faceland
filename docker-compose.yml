@@ -1,0 +1,48 @@
+services:
+  faceland-app:
+    container_name: faceland-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@faceland-db:5432/faceland?schema=public
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - SESSION_SECRET=${SESSION_SECRET:-change-this-to-a-secure-secret-key}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    depends_on:
+      faceland-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  faceland-db:
+    container_name: faceland-db
+    image: postgres:15-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=faceland
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Migration service - runs once to set up the database
+  faceland-migrate:
+    container_name: faceland-migrate
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@faceland-db:5432/faceland?schema=public
+    depends_on:
+      faceland-db:
+        condition: service_healthy
+

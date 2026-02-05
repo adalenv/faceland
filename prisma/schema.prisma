@@ -1,0 +1,121 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FormStatus {
+  draft
+  published
+}
+
+enum QuestionType {
+  short_text
+  long_text
+  single_choice
+  multiple_choice
+  email
+  phone
+  consent
+}
+
+model Form {
+  id                 String        @id @default(cuid())
+  name               String
+  slug               String        @unique
+  status             FormStatus    @default(draft)
+  introTitle         String?
+  introDescription   String?
+  thankYouTitle      String?       @default("Thank you!")
+  thankYouMessage    String?       @default("Your response has been recorded.")
+  redirectUrl        String?
+  redirectDelaySec   Int?          @default(5)
+  webhookUrl         String?
+  webhookEnabled     Boolean       @default(false)
+  webhookSecret      String?
+  publishedVersionId String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  questions         Question[]
+  versions          FormVersion[]
+  submissions       Submission[]
+  webhookDeliveries WebhookDelivery[]
+  publishedVersion  FormVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+}
+
+model FormVersion {
+  id            String   @id @default(cuid())
+  formId        String
+  versionNumber Int
+  snapshotJson  Json
+  createdAt     DateTime @default(now())
+
+  form              Form   @relation(fields: [formId], references: [id], onDelete: Cascade)
+  publishedForForms Form[] @relation("PublishedVersion")
+
+  @@unique([formId, versionNumber])
+}
+
+model Question {
+  id         String       @id @default(cuid())
+  formId     String
+  key        String
+  type       QuestionType
+  label      String
+  required   Boolean      @default(false)
+  order      Int
+  configJson Json?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, key])
+}
+
+model Submission {
+  id        String   @id @default(cuid())
+  formId    String
+  createdAt DateTime @default(now())
+  ip        String?
+  userAgent String?
+  referrer  String?
+  utmJson   Json?
+
+  form    Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers Answer[]
+}
+
+model Answer {
+  id            String @id @default(cuid())
+  submissionId  String
+  questionKey   String
+  questionLabel String
+  questionType  String
+  valueJson     Json
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
+
+model WebhookDelivery {
+  id               String    @id @default(cuid())
+  formId           String
+  submissionId     String
+  url              String
+  requestBodyJson  Json
+  responseStatus   Int?
+  responseBodyText String?
+  success          Boolean   @default(false)
+  attempts         Int       @default(0)
+  lastError        String?
+  nextAttemptAt    DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+}
+
