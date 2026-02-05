@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -23,28 +24,31 @@ enum QuestionType {
 }
 
 model Form {
-  id                 String        @id @default(cuid())
-  name               String
-  slug               String        @unique
-  status             FormStatus    @default(draft)
-  introTitle         String?
-  introDescription   String?
-  thankYouTitle      String?       @default("Thank you!")
-  thankYouMessage    String?       @default("Your response has been recorded.")
-  redirectUrl        String?
-  redirectDelaySec   Int?          @default(5)
-  webhookUrl         String?
-  webhookEnabled     Boolean       @default(false)
-  webhookSecret      String?
-  publishedVersionId String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                  String        @id @default(cuid())
+  name                String
+  slug                String        @unique
+  status              FormStatus    @default(draft)
+  introTitle          String?
+  introDescription    String?
+  thankYouTitle       String?       @default("Thank you!")
+  thankYouMessage     String?       @default("Your response has been recorded.")
+  redirectUrl         String?
+  redirectDelaySec    Int?          @default(5)
+  webhookUrl          String?
+  webhookEnabled      Boolean       @default(false)
+  webhookSecret       String?
+  distributionEnabled Boolean       @default(false)
+  publishedVersionId  String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
-  questions         Question[]
-  versions          FormVersion[]
-  submissions       Submission[]
-  webhookDeliveries WebhookDelivery[]
-  publishedVersion  FormVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+  questions           Question[]
+  versions            FormVersion[]
+  submissions         Submission[]
+  webhookDeliveries   WebhookDelivery[]
+  crmDeliveries       CrmDelivery[]
+  distributionClients FormDistributionClient[]
+  publishedVersion    FormVersion?  @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
 }
 
 model FormVersion {
@@ -86,8 +90,9 @@ model Submission {
   referrer  String?
   utmJson   Json?
 
-  form    Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
-  answers Answer[]
+  form          Form          @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers       Answer[]
+  crmDeliveries CrmDelivery[]
 }
 
 model Answer {
@@ -117,5 +122,69 @@ model WebhookDelivery {
   updatedAt        DateTime  @updatedAt
 
   form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+}
+
+// CRM Lead Distribution Models
+
+model CrmClient {
+  id           String   @id @default(cuid())
+  name         String
+  apiUrl       String
+  apiKey       String?
+  apiSecret    String?
+  httpMethod   String   @default("POST")
+  headers      Json?
+  fieldMapping Json     @default("{}")
+  enabled      Boolean  @default(true)
+  priority     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  quotas      CrmQuota[]
+  deliveries  CrmDelivery[]
+  formClients FormDistributionClient[]
+}
+
+model CrmQuota {
+  id         String   @id @default(cuid())
+  clientId   String
+  leadLimit  Int
+  periodDays Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  client CrmClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model CrmDelivery {
+  id             String   @id @default(cuid())
+  clientId       String
+  submissionId   String
+  formId         String
+  requestBody    Json
+  responseStatus Int?
+  responseBody   String?
+  success        Boolean  @default(false)
+  attempts       Int      @default(0)
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  client     CrmClient  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  form       Form       @relation(fields: [formId], references: [id], onDelete: Cascade)
+}
+
+model FormDistributionClient {
+  id       String  @id @default(cuid())
+  formId   String
+  clientId String
+  enabled  Boolean @default(true)
+  priority Int?
+
+  form   Form      @relation(fields: [formId], references: [id], onDelete: Cascade)
+  client CrmClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, clientId])
 }
 

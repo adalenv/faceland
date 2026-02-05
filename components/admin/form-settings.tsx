@@ -2,12 +2,14 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Form, WebhookDelivery } from '@prisma/client'
+import Link from 'next/link'
+import { Form, WebhookDelivery, CrmClient, CrmQuota, FormDistributionClient } from '@prisma/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
@@ -21,7 +23,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
-import { updateForm } from '@/app/admin/forms/actions'
+import { updateForm, updateFormDistribution } from '@/app/admin/forms/actions'
 import { formatDate } from '@/lib/utils'
 import {
   Save,
@@ -32,19 +34,51 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  Code,
+  Share2,
+  ExternalLink,
 } from 'lucide-react'
+
+type CrmClientWithQuotas = CrmClient & { quotas: CrmQuota[] }
+type FormDistributionClientWithClient = FormDistributionClient & {
+  client: CrmClientWithQuotas
+}
 
 interface FormSettingsProps {
   form: Form
   webhookDeliveries: WebhookDelivery[]
+  distributionClients?: FormDistributionClientWithClient[]
+  availableCrmClients?: CrmClientWithQuotas[]
 }
 
-export function FormSettings({ form: initialForm, webhookDeliveries }: FormSettingsProps) {
+interface ClientConfig {
+  clientId: string
+  enabled: boolean
+  priority: number | null
+}
+
+export function FormSettings({ 
+  form: initialForm, 
+  webhookDeliveries,
+  distributionClients = [],
+  availableCrmClients = [],
+}: FormSettingsProps) {
   const [form, setForm] = useState(initialForm)
   const [isSaving, setIsSaving] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
+  const [isSavingDistribution, setIsSavingDistribution] = useState(false)
   const [customSubmitUrl, setCustomSubmitUrl] = useState('')
+  const [distributionEnabled, setDistributionEnabled] = useState(form.distributionEnabled)
+  const [clientConfigs, setClientConfigs] = useState<ClientConfig[]>(() => {
+    // Initialize from existing distribution clients
+    const existingMap = new Map(
+      distributionClients.map((dc) => [dc.clientId, { enabled: dc.enabled, priority: dc.priority }])
+    )
+    return availableCrmClients.map((client) => ({
+      clientId: client.id,
+      enabled: existingMap.get(client.id)?.enabled ?? false,
+      priority: existingMap.get(client.id)?.priority ?? null,
+    }))
+  })
   const router = useRouter()
   const { toast } = useToast()
 
@@ -138,12 +172,53 @@ export function FormSettings({ form: initialForm, webhookDeliveries }: FormSetti
     })
   }
 
+  function updateClientConfig(clientId: string, field: 'enabled' | 'priority', value: boolean | number | null) {
+    setClientConfigs((prev) =>
+      prev.map((c) =>
+        c.clientId === clientId ? { ...c, [field]: value } : c
+      )
+    )
+  }
+
+  async function handleSaveDistribution() {
+    setIsSavingDistribution(true)
+    try {
+      const enabledConfigs = clientConfigs.filter((c) => c.enabled)
+      await updateFormDistribution(form.id, distributionEnabled, enabledConfigs)
+      toast({
+        title: 'Distribution settings saved',
+        description: 'Lead distribution configuration has been updated.',
+      })
+      router.refresh()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to save distribution settings',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSavingDistribution(false)
+    }
+  }
+
+  function formatQuota(quota: CrmQuota) {
+    const period = quota.periodDays === 1 
+      ? 'day' 
+      : quota.periodDays === 7 
+        ? 'week' 
+        : quota.periodDays === 30 
+          ? 'month' 
+          : `${quota.periodDays}d`
+    return `${quota.leadLimit}/${period}`
+  }
+
   return (
     <Tabs defaultValue="general" className="space-y-6">
       <TabsList>
         <TabsTrigger value="general">General</TabsTrigger>
         <TabsTrigger value="thankyou">Thank You</TabsTrigger>
         <TabsTrigger value="webhook">Webhook</TabsTrigger>
+        <TabsTrigger value="distribution">Distribution</TabsTrigger>
         <TabsTrigger value="export">Export</TabsTrigger>
       </TabsList>
 
@@ -241,20 +316,31 @@ export function FormSettings({ form: initialForm, webhookDeliveries }: FormSetti
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {distributionEnabled && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  <strong>Note:</strong> Lead Distribution is enabled for this form. 
+                  Webhooks are disabled when distribution is active. 
+                  Disable distribution in the Distribution tab to use webhooks.
+                </p>
+              </div>
+            )}
+            
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label>Enable Webhook</Label>
+                <Label className={distributionEnabled ? 'text-slate-400' : ''}>Enable Webhook</Label>
                 <p className="text-xs text-slate-500">
                   POST lead data to your endpoint
                 </p>
               </div>
               <Switch
-                checked={form.webhookEnabled}
+                checked={form.webhookEnabled && !distributionEnabled}
                 onCheckedChange={(checked) => setForm({ ...form, webhookEnabled: checked })}
+                disabled={distributionEnabled}
               />
             </div>
 
-            {form.webhookEnabled && (
+            {form.webhookEnabled && !distributionEnabled && (
               <>
                 <Separator />
                 <div className="space-y-2">
@@ -358,6 +444,125 @@ export function FormSettings({ form: initialForm, webhookDeliveries }: FormSetti
             </CardContent>
           </Card>
         )}
+      </TabsContent>
+
+      <TabsContent value="distribution" className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5" />
+              Lead Distribution
+            </CardTitle>
+            <CardDescription>
+              Automatically send leads to CRM clients based on quotas and priority
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Enable Distribution</Label>
+                <p className="text-xs text-slate-500">
+                  Automatically distribute leads to configured CRM clients
+                </p>
+              </div>
+              <Switch
+                checked={distributionEnabled}
+                onCheckedChange={setDistributionEnabled}
+              />
+            </div>
+
+            {distributionEnabled && (
+              <>
+                <Separator />
+                
+                {availableCrmClients.length === 0 ? (
+                  <div className="text-center py-8 bg-slate-50 rounded-lg border border-dashed">
+                    <p className="text-slate-600">No CRM clients configured</p>
+                    <Button variant="link" asChild className="mt-2">
+                      <Link href="/admin/distribution/clients">
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        Configure CRM Clients
+                      </Link>
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <Label>Select CRM Clients</Label>
+                    <p className="text-xs text-slate-500">
+                      Choose which clients should receive leads from this form.
+                      If none selected, all enabled clients will be used.
+                    </p>
+                    
+                    <div className="border rounded-lg divide-y">
+                      {availableCrmClients.map((client) => {
+                        const config = clientConfigs.find((c) => c.clientId === client.id)
+                        return (
+                          <div
+                            key={client.id}
+                            className="flex items-center justify-between p-4"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={config?.enabled ?? false}
+                                onCheckedChange={(checked) =>
+                                  updateClientConfig(client.id, 'enabled', !!checked)
+                                }
+                              />
+                              <div>
+                                <div className="font-medium">{client.name}</div>
+                                <div className="text-xs text-slate-500 flex items-center gap-2">
+                                  <span>Priority: {client.priority}</span>
+                                  {client.quotas.length > 0 && (
+                                    <>
+                                      <span>•</span>
+                                      <span>
+                                        Quotas:{' '}
+                                        {client.quotas.map((q) => formatQuota(q)).join(', ')}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {config?.enabled && (
+                              <div className="flex items-center gap-2">
+                                <Label className="text-xs text-slate-500">Override Priority:</Label>
+                                <Input
+                                  type="number"
+                                  className="w-20 h-8"
+                                  placeholder={String(client.priority)}
+                                  value={config.priority ?? ''}
+                                  onChange={(e) =>
+                                    updateClientConfig(
+                                      client.id,
+                                      'priority',
+                                      e.target.value ? parseInt(e.target.value) : null
+                                    )
+                                  }
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end">
+          <Button onClick={handleSaveDistribution} disabled={isSavingDistribution}>
+            {isSavingDistribution ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Save Distribution Settings
+          </Button>
+        </div>
       </TabsContent>
 
       <TabsContent value="export" className="space-y-6">

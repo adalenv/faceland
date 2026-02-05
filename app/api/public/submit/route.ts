@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { PublicSubmissionSchema, FormSnapshot, validateAnswer, QuestionConfig } from '@/lib/validations'
 import { enqueueWebhook, WebhookPayload } from '@/lib/webhook'
+import { distributeSubmission } from '@/lib/distribution'
 
 export async function POST(request: NextRequest) {
   try {
@@ -85,8 +86,44 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Enqueue webhook if enabled
-    if (form.webhookEnabled && form.webhookUrl) {
+    // Build answers object for webhook and distribution
+    const answersObject = Object.fromEntries(
+      submission.answers.map((a) => [
+        a.questionKey,
+        {
+          questionKey: a.questionKey,
+          questionLabel: a.questionLabel,
+          questionType: a.questionType,
+          value: a.valueJson,
+        },
+      ])
+    )
+
+    const submissionMeta = {
+      ip: submission.ip,
+      userAgent: submission.userAgent,
+      referrer: submission.referrer,
+      utm: submission.utmJson as Record<string, string | null> | null,
+      createdAt: submission.createdAt.toISOString(),
+    }
+
+    // Distribute to CRM clients if enabled (takes priority over webhooks)
+    if (form.distributionEnabled) {
+      // Run distribution in background (don't block response)
+      distributeSubmission(
+        form.id,
+        submission.id,
+        answersObject,
+        {
+          formSlug: form.slug,
+          formName: form.name,
+          ...submissionMeta,
+        }
+      ).catch((error) => {
+        console.error('Distribution error:', error)
+      })
+    } else if (form.webhookEnabled && form.webhookUrl) {
+      // Only use webhook if distribution is NOT enabled
       const payload: WebhookPayload = {
         event: 'lead.created',
         timestamp: new Date().toISOString(),
@@ -94,24 +131,8 @@ export async function POST(request: NextRequest) {
         formSlug: form.slug,
         formName: form.name,
         submissionId: submission.id,
-        answers: Object.fromEntries(
-          submission.answers.map((a) => [
-            a.questionKey,
-            {
-              questionKey: a.questionKey,
-              questionLabel: a.questionLabel,
-              questionType: a.questionType,
-              value: a.valueJson,
-            },
-          ])
-        ),
-        meta: {
-          ip: submission.ip,
-          userAgent: submission.userAgent,
-          referrer: submission.referrer,
-          utm: submission.utmJson as Record<string, string | null> | null,
-          createdAt: submission.createdAt.toISOString(),
-        },
+        answers: answersObject,
+        meta: submissionMeta,
       }
 
       await enqueueWebhook(

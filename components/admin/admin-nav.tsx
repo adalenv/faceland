@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { FileText, LogOut } from 'lucide-react'
+import { FileText, LogOut, Share2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { logoutAction } from '@/app/admin/actions'
 
@@ -41,6 +41,18 @@ export function AdminNav() {
               )}
             >
               Forms
+            </Link>
+            <Link
+              href="/admin/distribution"
+              className={cn(
+                'text-sm font-medium transition-colors hover:text-blue-600 flex items-center gap-1.5',
+                pathname.startsWith('/admin/distribution')
+                  ? 'text-blue-600'
+                  : 'text-slate-600'
+              )}
+            >
+              <Share2 className="h-4 w-4" />
+              Distribution
             </Link>
           </nav>
         </div>

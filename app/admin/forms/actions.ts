@@ -268,3 +268,38 @@ export async function unpublishForm(formId: string) {
   revalidatePath('/admin/forms')
 }
 
+// Distribution settings
+
+export async function updateFormDistribution(
+  formId: string,
+  enabled: boolean,
+  clientConfigs: { clientId: string; enabled: boolean; priority: number | null }[]
+) {
+  await requireAuth()
+  
+  // Update form distribution enabled flag
+  await prisma.form.update({
+    where: { id: formId },
+    data: { distributionEnabled: enabled },
+  })
+  
+  // Delete existing client associations
+  await prisma.formDistributionClient.deleteMany({
+    where: { formId },
+  })
+  
+  // Create new client associations
+  if (clientConfigs.length > 0) {
+    await prisma.formDistributionClient.createMany({
+      data: clientConfigs.map((config) => ({
+        formId,
+        clientId: config.clientId,
+        enabled: config.enabled,
+        priority: config.priority,
+      })),
+    })
+  }
+  
+  revalidatePath(`/admin/forms/${formId}/settings`)
+}
+

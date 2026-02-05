@@ -15,15 +15,29 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
   
   const { id } = await params
   
-  const form = await prisma.form.findUnique({
-    where: { id },
-    include: {
-      webhookDeliveries: {
-        orderBy: { createdAt: 'desc' },
-        take: 20,
+  const [form, crmClients] = await Promise.all([
+    prisma.form.findUnique({
+      where: { id },
+      include: {
+        webhookDeliveries: {
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        },
+        distributionClients: {
+          include: {
+            client: {
+              include: { quotas: true },
+            },
+          },
+        },
       },
-    },
-  })
+    }),
+    prisma.crmClient.findMany({
+      where: { enabled: true },
+      include: { quotas: true },
+      orderBy: { priority: 'desc' },
+    }),
+  ])
 
   if (!form) {
     notFound()
@@ -45,7 +59,12 @@ export default async function SettingsPage({ params }: SettingsPageProps) {
         </div>
       </div>
 
-      <FormSettings form={form} webhookDeliveries={form.webhookDeliveries} />
+      <FormSettings 
+        form={form} 
+        webhookDeliveries={form.webhookDeliveries}
+        distributionClients={form.distributionClients}
+        availableCrmClients={crmClients}
+      />
     </div>
   )
 }

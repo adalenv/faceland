@@ -23,13 +23,13 @@ export function generateKey(label: string): string {
 
 export function formatDate(date: Date | string): string {
   const d = new Date(date)
-  return d.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  // Use UTC to avoid hydration mismatch between server and client
+  const year = d.getUTCFullYear()
+  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })
+  const day = d.getUTCDate()
+  const hours = d.getUTCHours().toString().padStart(2, '0')
+  const minutes = d.getUTCMinutes().toString().padStart(2, '0')
+  return `${month} ${day}, ${year}, ${hours}:${minutes}`
 }
 
 export function truncate(str: string, length: number): string {
